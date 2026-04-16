@@ -27,7 +27,7 @@ def cns_mpo(smiles: str) -> dict:
     clogd = clogp - 0.75  # Simplified
     tpsa  = rdMolDescriptors.CalcTPSA(mol)
     hbd   = rdMolDescriptors.CalcNumHBD(mol)
-    pka   = 8.0  # Placeholder; requires external pKa calculator (e.g. oechem)
+    pka   = 8.0  # Placeholder; requires external pKa calculator (e.g. oechem, epik)
 
     # --- Desirability functions (Wager et al. 2010) ---
     scores = {
