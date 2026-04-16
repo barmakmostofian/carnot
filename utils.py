@@ -50,7 +50,3 @@ def cns_mpo(smiles: str) -> dict:
         "CNS_favorable": mpo_score >= 4.0
     }
 
-# --- Example ---
-result = cns_mpo("CN1CCC[C@H]1c2cccnc2")  # Nicotine
-for k, v in result.items():
-    print(f"{k}: {v}")
