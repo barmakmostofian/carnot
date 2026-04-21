@@ -1,11 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from rdkit import Chem
-from rdkit.Chem import Descriptors, rdMolDescriptors
-
-from utils import desirability
-from utils import cns_mpo
+from utils import desirability, cns_mpo
 
 
 
