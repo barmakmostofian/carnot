@@ -1,9 +1,12 @@
 import sys
 import numpy as np
 import pandas as pd
-from rdkit import Chem
-from rdkit.Chem import RDKFingerprint
-from rdkit import DataStructs
+
+from utils import *
+
+from rdkit.Chem         import MolFromSmiles
+from rdkit.DataStructs  import BulkTanimotoSimilarity
+
 
 
 # ------------------------------------------------------------------
@@ -11,7 +14,7 @@ from rdkit import DataStructs
 # ------------------------------------------------------------------
 
 CSV_FILE    = "example_compounds.csv"   # path to your input CSV file
-SMI_COL     = "compound structure"      # column name for smiles strings
+SMI_COL     = "Compound Structure"      # column name for smiles strings
 PIC50_COL   = "pic50"                   # column name for pIC50 values
 FP_SIZE     = 1024                      # number of bits in the fingerprint
 MIN_PATH    = 1                         # minimum path length (bonds)
@@ -56,7 +59,7 @@ fps  = []
 failed = []
 
 for idx, smi in enumerate(smiles_list):
-    mol = Chem.MolFromSmiles(smi)
+    mol = MolFromSmiles(smi)
     if mol is None:
         print(f"  WARNING: could not parse SMILES at row {idx}: {smi}")
         failed.append(idx)
@@ -77,76 +80,36 @@ print(f"  Bits set in fingerprint 1: {fps[0].GetNumOnBits()} / {FP_SIZE}")
 
 
 
-# ------------------------------------------------------------------
-# Build the Tanimoto similarity matrix, T,and prove that it is a kernel
-# ------------------------------------------------------------------
-# DataStructs.BulkTanimotoSimilarity(fp_i, fp_list) computes the
-# Tanimoto similarity between fp_i and every fingerprint in fp_list
-# in a single efficient call. We use this to fill row i of T.
+# -------------------------------------------------------------------------------
+# Build the Tanimoto similarity matrix, T, prove that it is a kernel, and save it
+# -------------------------------------------------------------------------------
 
 print("\nBuilding Tanimoto kernel matrix T ...")
 
+# Compute Tanimoto similarity between any given FP and all other in the list, 
+# saving the list of values row-wise in T
 T = np.zeros((n, n))
 for i in range(n):
-    row = DataStructs.BulkTanimotoSimilarity(fps[i], fps)
+    row = BulkTanimotoSimilarity(fps[i], fps)
     T[i, :] = row
 
 print("...done.")
 
 
+# Check that T is a symmetric matrix with a unit diagonal.
+check_unit_symmetry(T)
 
-# Print all values, then the diagonal, and some off-diagonal metrics
-print("\nTanimoto matrix:")
-col_names = "\t\t" + "  ".join(f"mol_{j+1:02d}" for j in range(n))
-print(col_names)
-for i in range(n):
-    row_name = f"mol_{i+1:02d}"
-    row_vals = "  ".join(f"{T[i,j]:.3f}" for j in range(n))
-    print(f"{row_name}\t\t{row_vals}")
+# Print out matrix values, all diagonal values again, and check som off-diag metrics. 
+echo_matrix(T)
 
+# Check that T is positive-semidefinite.
+check_psd(T)
 
-print(f"\nDiagonal entries (should all be 1.000):")
-print("  " + "  ".join(f"{v:.3f}" for v in np.diag(T)))
-
-
-upper = T[np.triu_indices(n, k=1)]
-print(f"\nOff-diagonal summary:")
-print(f"  Min  : {upper.min():.4f}")
-print(f"  Max  : {upper.max():.4f}")
-print(f"  Mean : {upper.mean():.4f}")
-
-
-
-# Check for pairs with Tanimoto = 1.0 (which are structurally identical based on their fingerprints)
-identical_pairs = [(i+1, j+1) for i in range(n) for j in range(i+1, n)
-                   if T[i, j] >= 0.9999]
-if identical_pairs:
-    print(f"\n  Pairs with T = 1.000 (identical fingerprints):")
-    for a, b in identical_pairs:
-        print(f"    mol_{a:02d} and mol_{b:02d}")
-    print("  Note: identical rows make the matrix singular — this confirms")
-    print("  that adding noise is essential for invertibility.")
-
-
-# Check for symmetry and diagonal assertions
-assert np.allclose(T, T.T),         "T is not symmetric."
-assert np.allclose(np.diag(T), 1.0),"Diagonal is not 1.0."
-print("\nSymmetry check  : passed")
-print("Diagonal check  : passed")
-
-
-# Check that T is positive-definite
-eigenvalues = np.linalg.eigvalsh(T)   # eigvalsh is for symmetric matrices
-print(f"\nEigenvalue check (T should be positive semi-definite):")
-print(f"  Smallest eigenvalue : {eigenvalues.min():.6f}")
-print(f"  Largest eigenvalue  : {eigenvalues.max():.6f}")
-print(f"  Number of eigenvalues < 1e-6: "
-      f"{np.sum(eigenvalues < 1e-6)}")
-
-if eigenvalues.min() < -1e-6:
-    print("  WARNING: T has negative eigenvalues — not PSD.")
-else:
-    print("  T is positive semi-definite. PSD check passed.")
+# Check if there are any identical pairs, i.e. T[i,j]=1 with i!=j.
+# This is actually key to the matrix notation of GPs. 
+# If identical rows exist (or even such that are linearly dependent), the matrix is singular (has determinant of 0)
+# and thus has no inverse. This would confirm that adding noise at this stage is essential to solve the GP equation.
+get_identical_pairs(T)
 
 
 # Save Tanimoto kernel
