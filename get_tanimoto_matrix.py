@@ -15,7 +15,7 @@ from rdkit.DataStructs  import BulkTanimotoSimilarity
 
 CSV_FILE    = "example_compounds.csv"   # path to your input CSV file
 SMI_COL     = "Compound Structure"      # column name for smiles strings
-PIC50_COL   = "pic50"                   # column name for pIC50 values
+OBS_COL     = "pic50"                   # column name for observed values
 FP_SIZE     = 1024                      # number of bits in the fingerprint
 MIN_PATH    = 1                         # minimum path length (bonds)
 MAX_PATH    = 7                         # maximum path length (bonds)
@@ -38,7 +38,7 @@ print(f"  Columns found: {list(df.columns)}")
 
 # Convert data to arrays for downstream use
 smiles_list = df[SMI_COL].tolist()
-pic50       = df[PIC50_COL].to_numpy(dtype=float)
+obs_list    = df[OBS_COL].to_numpy(dtype=float)
 n           = len(smiles_list)
 
 
@@ -70,9 +70,9 @@ for idx, smi in enumerate(smiles_list):
 
 if failed:
     # Drop rows with unparseable SMILES
-    df      = df.drop(index=failed).reset_index(drop=True)
-    pic50   = np.delete(pic50, failed)
-    n       = len(fps)
+    df          = df.drop(index=failed).reset_index(drop=True)
+    obs_list    = np.delete(obs_list, failed)
+    n           = len(fps)
     print(f"  {len(failed)} compound(s) dropped due to invalid SMILES.")
 
 print(f"  Done. {n} fingerprints computed.")
@@ -102,7 +102,7 @@ check_unit_symmetry(T)
 # Print out matrix values, all diagonal values again, and check som off-diag metrics. 
 echo_matrix(T)
 
-# Check that T is positive-semidefinite.
+# Check that T is positive semi-definite.
 check_psd(T)
 
 # Check if there are any identical pairs, i.e. T[i,j]=1 with i!=j.
@@ -112,7 +112,7 @@ check_psd(T)
 get_identical_pairs(T)
 
 
-# Save Tanimoto kernel
+# Save Tanimoto matrix
 np.save("tanimoto_matrix.npy", T)
 
 
