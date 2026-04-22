@@ -1,5 +1,5 @@
 import numpy as np
-
+from scipy import linalg
 from rdkit.Chem import MolFromSmiles, Descriptors, rdMolDescriptors, RDKFingerprint
 
 
@@ -62,13 +62,13 @@ def cns_mpo(smiles: str) -> dict:
 
 
 ###############################################################################################
-# Check the validity of a Tanimoto similarity matrix to serve as a Kernel in GPs 
+# Check the validity of a similarity matrices to serve as a Kernel in GPs 
 ###############################################################################################
 
 # Check that the matrix is positive semi-definite indentifying its smallest eigenvalue
 def check_psd(matrix) :
     eigenvalues = np.linalg.eigvalsh(matrix)   
-    print(f"\nEigenvalue check (Matrix should be positive semi-definite):")
+    print(f"\nEigenvalue check (matrix should be positive semi-definite):")
     print(f"  Smallest eigenvalue : {eigenvalues.min():.6f}")
     print(f"  Largest eigenvalue  : {eigenvalues.max():.6f}")
     print(f"  Number of eigenvalues < 1e-6: "f"{np.sum(eigenvalues < 1e-6)}")
@@ -76,7 +76,25 @@ def check_psd(matrix) :
     if eigenvalues.min() < -1e-6:
         print("\n  WARNING: Matrix has negative eigenvalues — not PSD.")
     else:
-        print("\n  Matrix is positive semi-definite.\n  PSD check passed!")
+        print("\n  Matrix is positive semi-definite.\n  Confirmed!")
+
+
+
+# Check that the matrix is positive definite indentifying its smallest eigenvalue
+def check_pd(matrix) :
+    eigenvalues = np.linalg.eigvalsh(matrix)
+    print(f"\nEigenvalue check (matrix should be positive definite):")
+    print(f"  Smallest eigenvalue: {eigenvalues.min():.6f}  "
+      f"(must be > 0 for Cholesky factorization to succeed)")
+    print(f"  Largest eigenvalue : {eigenvalues.max():.6f}")
+
+    if eigenvalues.min() <= 0:
+        raise SystemExit(
+            "Matrix is not strictly positive definite.\n"
+            "Try increasing SIGMA2_N."
+        )
+    else :
+        print("  Matrix is strictly positive definite:\n  Confirmed!")
 
 
 
@@ -129,5 +147,22 @@ def echo_matrix(matrix) :
     print(f"  Min  : {upper.min():.4f}")
     print(f"  Max  : {upper.max():.4f}")
     print(f"  Mean : {upper.mean():.4f}")
+
+
+
+def factorize(matrix) :
+    matrix_factor, lower = linalg.cho_factor(matrix, lower=True)
+    lower_tri = np.tril(matrix_factor)
+
+    matrix_rebuilt = lower_tri @ lower_tri.T
+    max_error = np.abs( matrix_rebuilt - matrix).max()
+    print(f"\n  Verification if matrix is rebuilt by 'lower_triangle * upper_triangle':")
+    print(f"  Max absolute entry-wise error: {max_error:.2e}")
+    assert max_error < 1e-8, "Cholesky factorization failed."
+    print("  Cholesky factorization check passed!")
+
+    return matrix_factor, lower_tri 
+
+
 
 ############################################################################################################
