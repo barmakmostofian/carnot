@@ -2,6 +2,10 @@
 This script runs GP naively, i.e., removing one compound at a time, 
 refitting the GP on the remaining n-1 compounds, and predicting the 
 held-out compound.
+
+The corresponding GP equations in matrix notation are:
+μ* = k*ᵀ · (K + σ²ₙI)⁻¹ · y
+σ²* = k** − kᵀ · (K + σ²ₙI)⁻¹ · k*
 """
 
 
@@ -59,23 +63,65 @@ print(f"  Centered values: {np.round(y, 3)}")
 
 
 # ------------------------------------------------------------------
-# Construct and check Kriging matrix
+# Construct and check Kriging matrix, K 
 # ------------------------------------------------------------------
 
-C = SIGMA2_F * T + SIGMA2_N * np.eye(n)
+K = SIGMA2_F * T + SIGMA2_N * np.eye(n)
 
-print(f"\nConstructed Kriging matrix, C = {SIGMA2_F} * T + {SIGMA2_N} * I")
-print(f"  C diagonal (should be {SIGMA2_F + SIGMA2_N:.4f} everywhere):")
-print(f"  {np.round(np.diag(C), 4)}")
+print(f"\nConstructed Kriging matrix, K = {SIGMA2_F} * T + {SIGMA2_N} * I")
+print(f"  K diagonal (should be {SIGMA2_F + SIGMA2_N:.4f} everywhere):")
+print(f"  {np.round(np.diag(K), 4)}")
 
-# Check that C is positive definite.
-check_pd(C)
+# Check that K is positive definite.
+check_pd(K)
 
 
 
 # ------------------------------------------------------------------
 # Run naive LOO loop
 # ------------------------------------------------------------------
+
+# For each held-out compound i, the remaining compounds form the Kriging matrix, 
+# K_train, and the observed potencies, y_train. The Tanimoto similarities between 
+# the training set and the test compound is the vector k_star. The noisy self-
+# similarity of the test compound is k_starstar. The variable names follow the GP 
+# equation notation in the header.
+
+
+print(f"\nRunning naive LOO cross-validation ({n} folds) ...")
+
+loo_mu    = np.zeros(n)   # posterior mean values for each held-out compound
+loo_sigma = np.zeros(n)   # posterior std dev values for each held-out compound
+
+
+for i in range(n):
+
+    # Return the n-1 indices that remain when compound i is left out.
+    train_idx = np.array([j for j in range(n) if j != i])
+
+    K_train    = K[np.ix_(train_idx, train_idx)]    # (n-1) x (n-1) matrix
+    k_star     = K[i, train_idx]                    # (n-1) x 1 vector
+    k_starstar = K[i, i]                            # scalar
+    y_train    = y[train_idx]                       # (n-1) x 1 vector
+
+    # Cholesky factorisation of this fold's training matrix
+    K_factor_train, Lower_tri_train = factorize(K_train, lower=True)
+
+    # alpha_train = K_train^{-1} . y_train
+    alpha_train = linalg.cho_solve((K_factor_train, Lower_tri_train), y_train)
+
+    # Posterior mean (see header) 
+    # It is centered around 0, we add back mean_y
+    mu_centred  = float(k_star @ alpha_train)
+    loo_mu[i]   = mu_centred + mean_y
+
+    # Posterior variance (see header)
+    Kinv_kstar    = linalg.cho_solve((K_factor_train, Lower_tri_train), k_star)
+    var         = k_starstar - float(k_star @ Kinv_kstar)
+    var         = max(var, 0.0)   # numerical safety: clip to 0
+    loo_sigma[i]  = np.sqrt(var)
+
+print("  Done.")
 
 
 
