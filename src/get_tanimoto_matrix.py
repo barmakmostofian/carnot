@@ -38,7 +38,7 @@ print(f"  Columns found: {list(df.columns)}")
 
 # Convert data to arrays for downstream use
 smiles_list = df[SMI_COL].tolist()
-obs_list    = df[OBS_COL].to_numpy(dtype=float)
+obs_values    = df[OBS_COL].to_numpy(dtype=float)
 n           = len(smiles_list)
 
 
@@ -71,7 +71,7 @@ for idx, smi in enumerate(smiles_list):
 if failed:
     # Drop rows with unparseable SMILES
     df          = df.drop(index=failed).reset_index(drop=True)
-    obs_list    = np.delete(obs_list, failed)
+    obs_values  = np.delete(obs_values, failed)
     n           = len(fps)
     print(f"  {len(failed)} compound(s) dropped due to invalid SMILES.")
 

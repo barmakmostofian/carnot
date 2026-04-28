@@ -84,7 +84,7 @@ def factorize(matrix) :
 
     matrix_rebuilt = lower_tri @ lower_tri.T
     max_error = np.abs(matrix_rebuilt - matrix).max()
-    print(f"\n  Verification if matrix is rebuilt by 'lower_triangle * upper_triangle':")
+    print(f"  Verification if matrix is rebuilt by 'lower_triangle * upper_triangle':")
     print(f"  Max absolute entry-wise error: {max_error:.2e}")
     assert max_error < 1e-8, "Cholesky factorization failed."
     print("  Cholesky factorization check passed!")

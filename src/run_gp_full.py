@@ -38,8 +38,8 @@ except FileNotFoundError:
         "Could not find tanimoto_matrix.npy or '{CSV_FILE}'.\n"
     )
 
-obs_list    = df[OBS_COL].to_numpy(dtype=float)
-n           = len(obs_list)
+obs_values    = df[OBS_COL].to_numpy(dtype=float)
+n           = len(obs_values)
 if T.shape[0] != n :
     sys.exit("Error: tanimoto matrix seems to have the wrong shape!")
 else :
@@ -48,8 +48,8 @@ else :
 
 # Removing the mean of the observed values, against which we train the model, since the (uninformed) GP prior has zero mean.
 # After making predictions in centered space, the mean can be added back when reporting results.
-mean_y = obs_list.mean()
-y      = obs_list - mean_y
+mean_y = obs_values.mean()
+y      = obs_values - mean_y
 
 print(f"\nObserved values, y:")
 print(f"  Arithmetic mean: {mean_y:.4f}")
@@ -58,20 +58,20 @@ print(f"  Centered values: {np.round(y, 3)}")
 
 
 # ------------------------------------------------------------------
-# Construct, check, and factorize Kriging matrix 
+# Construct, check, and factorize Kriging matrix, K 
 # ------------------------------------------------------------------
 
-C = SIGMA2_F * T + SIGMA2_N * np.eye(n)
+K = SIGMA2_F * T + SIGMA2_N * np.eye(n)
 
-print(f"\nConstructed Kriging matrix, C = {SIGMA2_F} * T + {SIGMA2_N} * I")
-print(f"  C diagonal (should be {SIGMA2_F + SIGMA2_N:.4f} everywhere):")
-print(f"  {np.round(np.diag(C), 4)}")
+print(f"\nConstructed Kriging matrix, K = {SIGMA2_F} * T + {SIGMA2_N} * I")
+print(f"  K diagonal (should be {SIGMA2_F + SIGMA2_N:.4f} everywhere):")
+print(f"  {np.round(np.diag(K), 4)}")
 
-# Check that C is positive definite.
-check_pd(C)
+# Check that K is positive definite.
+check_pd(K)
 
-# Factorize C
-C_factor, Lower_tri = factorize(C)
+# Factorize K
+K_factor, Lower_tri = factorize(K)
 
 print("\n  Lower triangular factor of the Kriging matrix, first 5 x 5 block:")
 print(np.round(Lower_tri[:5, :5], 4))
@@ -79,11 +79,11 @@ print(np.round(Lower_tri[:5, :5], 4))
 
 
 # ------------------------------------------------------------------
-# Compute, check, and save weights 
+# Compute, check, and save weights, alpha 
 # ------------------------------------------------------------------
 
-print(f"\nComputing alpha = C^{{-1}} . y via forward + backward substitution ...")
-alpha = linalg.cho_solve((C_factor, Lower_tri), y)
+print(f"\nComputing alpha = K^{{-1}} . y via forward + backward substitution ...")
+alpha = linalg.cho_solve((K_factor, Lower_tri), y)
 
 print(f"  alpha (adjusted weight vector):")
 for i, a in enumerate(alpha):
