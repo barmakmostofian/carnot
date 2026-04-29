@@ -1,10 +1,13 @@
 """
-This script runs GP with a naive LOO-CV, i.e., removing one compound 
-at a time, refitting the GP on the remaining n-1 compounds, and 
-predicting the held-out compound.
+This script runs GP with a LOO-CV cut short by applying
+the Cholesky decomposition only once to the full matrix
+and, based on the (Woodbury) matrix inversion lemma, still 
+deriving the inverse of submatrices from a rank-one removal, 
+i.e., when one row and column were dropped.
 
-With n applications of the resource-intensive Cholesky decomposition,
-the complexity of this approach is O(n^3).
+Obviously, this strategy applies the resource-intensive 
+decomposition only once and thus reduces the complexity from
+O(n^4) to O(n^3).
 
 The entire GP procedure follows the work of: 
 C. E. Rasmussen & C. K. I. Williams. 
@@ -26,6 +29,7 @@ from utils import *
 
 
 
+
 # ------------------------------------------------------------------
 # Define constants — edit these to match your file and preferences
 # ------------------------------------------------------------------
@@ -35,6 +39,7 @@ SMI_COL     = "Compound Structure"      # column name for smiles strings
 OBS_COL     = "pic50"                   # column name for observed values
 SIGMA2_F    = 1.0                       # signal variance  (scales the kernel amplitude)
 SIGMA2_N    = 0.1                       # noise variance   (added to diagonal only)
+
 
 
 
@@ -70,8 +75,9 @@ print(f"  Centered values: {np.round(y, 3)}")
 
 
 
+
 # ------------------------------------------------------------------
-# Construct and check Kriging matrix, K 
+# Construct, check, and factorize Kriging matrix, K
 # ------------------------------------------------------------------
 
 K = SIGMA2_F * T + SIGMA2_N * np.eye(n)
@@ -83,55 +89,79 @@ print(f"  {np.round(np.diag(K), 4)}")
 # Check that K is positive definite.
 check_pd(K)
 
+# Factorize K
+K_factor, Lower_tri = factorize(K)
+
+print("\n  Lower triangular factor of the Kriging matrix, first 5 x 5 block:")
+print(np.round(Lower_tri[:5, :5], 4))
+
+
 
 
 # ------------------------------------------------------------------
-# Run naive LOO loop
+# Compute, check, and save weights, alpha
 # ------------------------------------------------------------------
 
-# For each held-out compound i, the remaining compounds form the Kriging matrix, 
-# K_train, and the observed potencies, y_train. The Tanimoto similarities between 
-# the training set and the test compound is the vector k_star. The noisy self-
-# similarity of the test compound is k_starstar. The variable names follow the GP 
-# equation notation in the header.
+print(f"\nComputing alpha = K^{{-1}} . y via forward + backward substitution ...")
+alpha = linalg.cho_solve((K_factor, Lower_tri), y)
+
+print(f"  alpha (adjusted weight vector):")
+for i, a in enumerate(alpha):
+    print(f"    mol_{i+1:02d}  alpha = {a:+.6f}")
 
 
-print(f"\nRunning naive LOO cross-validation ({n} folds) ...")
-
-loo_mu    = np.zeros(n)   # posterior mean values for each held-out compound
-loo_sigma = np.zeros(n)   # posterior std dev values for each held-out compound
 
 
-for i in range(n):
-   
-    print(f"\n  fold {i+1}")
+# ------------------------------------------------------------------
+# Run LOO shortcut, algebraically replacing matrix decompositions
+# ------------------------------------------------------------------
+    
+# This strategy is based on obtaining the diagonal values of K^{-1} and
+# using the notion that, in LOO-CV, each data point serves as test data once
+# and thus, k_star and k_starstar (see 'run_gp_loocv_naive.py') can be 
+# algebraically incorportated into equations that directly derive the 
+# posterior mean and variance.
 
-    # Return the n-1 indices that remain when compound i is left out.
-    train_idx = np.array([j for j in range(n) if j != i])
+# To obtain K^{-1}, we solve a system of n linear equations: 
+# K . x_i = e_i, where e_i is the i-th column of the identity matrix.
+# The i-th entry of x_i must be [K^{-1}]_ii, i.e., the i-th entry of 
+# the diagonal of K^{-1}.
 
-    K_train    = K[np.ix_(train_idx, train_idx)]    # (n-1) x (n-1) matrix
-    k_star     = K[i, train_idx]                    # (n-1) x 1 vector
-    k_starstar = K[i, i]                            # scalar
-    y_train    = y[train_idx]                       # (n-1) x 1 vector
+print(f"\nComputing diagonal of K^{{-1}} ({n} triangular solves) ...")
+I_matrix   = np.eye(n)
+K_inv      = linalg.cho_solve((K_factor, Lower_tri), I_matrix)
+K_inv_diag = np.diag(K_inv)
 
-    # Cholesky factorisation of this fold's training matrix
-    K_factor_train, Lower_tri_train = factorize(K_train)
+print(f"  Diagonal of K^{{-1}}:")
+for i, d in enumerate(K_inv_diag):
+    print(f"  mol_{i+1:02d}  [K^{{-1}}]_ii = {d:.6f}")
 
-    # alpha_train = K_train^{-1} . y_train
-    alpha_train = linalg.cho_solve((K_factor_train, Lower_tri_train), y_train)
 
-    # Posterior mean (see header) 
-    # It is centered around 0, we add back mean_y
-    mu_centred  = float(k_star @ alpha_train)
-    loo_mu[i]   = mu_centred + mean_y
+# Check that all diagonal entries are positive
+# (K is positive definite, so its inverse is also positive definite,
+# so all diagonal entries of K^{-1} must be strictly positive)
+assert np.all(K_inv_diag > 0), \
+    "Negative diagonal entry in K^{-1} -- numerical problem."
+print("\n  All diagonal entries positive:") 
+print("  Confirmed.")
 
-    # Posterior variance (see header)
-    Kinv_kstar    = linalg.cho_solve((K_factor_train, Lower_tri_train), k_star)
-    var         = k_starstar - float(k_star @ Kinv_kstar)
-    var         = max(var, 0.0)   # numerical safety: clip to 0
-    loo_sigma[i]  = np.sqrt(var)
 
-print("\n  Done.")
+
+# The posterior mean and variance of the LOO-CV fold that is
+# trained without instance i are:
+# mu*_{-i}  = y_i - alpha_i / [K^{-1}]_ii
+# and:
+# sigma2*_{-i}  = 1 / [Ky^{-1}]_ii
+# [The notation {-i} in dicates that instance i was used as data.]
+
+print(f"\nApplying LOO shortcut formulas ...")
+
+loo_mu    = obs_values - alpha / K_inv_diag
+loo_var   = 1.0 / K_inv_diag
+loo_sigma = np.sqrt(np.maximum(loo_var, 0.0))
+
+print("  Done.")
+
 
 
 
@@ -139,7 +169,8 @@ print("\n  Done.")
 # Compute performance metrics
 # ------------------------------------------------------------------
 
-# Errors in terms of deviation from the observed values for each fold
+# See 'run_gp_loocv_naive.py' for some reference
+
 errors   = loo_mu - obs_values
 abs_err  = np.abs(errors)
 sq_err   = errors ** 2
@@ -147,32 +178,37 @@ sq_err   = errors ** 2
 rmse = np.sqrt(sq_err.mean())
 mae  = abs_err.mean()
 
-# Coefficients of determination for each fold.
-# According to Tropsha et al. (2002, 2003), this is referred to as 
-# Q2, the predictive analog of R2.
 ss_res = sq_err.sum()
 ss_tot = np.sum((obs_values - mean_y) ** 2)
 q2     = 1.0 - ss_res / ss_tot
 
-# Negative log predictive density (NLPD) measures the calibration, i.e., 
-# it penalises over- and underconfident predictions.
-# GPs predict a full Gaussian distribution for each fold: N(mu,sigma2_pred),
-# where sigma2_pred, the predictive uncertainty, is the posterior variance plus 
-# the observation noise.
-# NLPD is -log(N), thus it has two terms. The first penalizes models that
-# report large uncertainty, the second penalizes when large errors with small
-# uncertainty are reported.
 sigma2_pred = loo_sigma**2 + SIGMA2_N
 nlpd = np.mean(
     0.5 * np.log(2 * np.pi * sigma2_pred)
     + sq_err / (2 * sigma2_pred)
 )
 
-print(f"\nLOO cross-validation metrics:")
-print(f"  Q²   (LOO) : {q2:.4f}   (1.0 = perfect; >0.5 = useful model)")
+print(f"\nLOO cross-validation metrics (shortcut):")
+print(f"  Q²   (LOO) : {q2:.4f}")
 print(f"  RMSE (LOO) : {rmse:.4f} pIC50 units")
 print(f"  MAE  (LOO) : {mae:.4f} pIC50 units")
-print(f"  NLPD (LOO) : {nlpd:.4f} nats  (lower = better calibration)")
+print(f"  NLPD (LOO) : {nlpd:.4f} nats")
+
+
+# Here, also relevant, the diagonal values of the inverse of K:
+# Large [K^{-1}]_ii  => compound i is structurally unique =>
+#                        small sigma2*_{-i} => confident prediction
+# Small [K^{-1}]_ii  => compound i is redundant with neighbours =>
+#                        large sigma2*_{-i} => uncertain prediction
+
+print(f"\nInterpretation of [K^{{-1}}]_ii:")
+print(f"  Largest  [K^{{-1}}]_ii : "
+      f"mol_{np.argmax(K_inv_diag)+1:02d} = {K_inv_diag.max():.6f} "
+      f"=> most structurally unique compound")
+print(f"  Smallest [K^{{-1}}]_ii : "
+      f"mol_{np.argmin(K_inv_diag)+1:02d} = {K_inv_diag.min():.6f} "
+      f"=> most redundant compound")
+
 
 
 
@@ -193,6 +229,7 @@ for i in range(n):
 
 
 
+
 # ------------------------------------------------------------------
 # Uncertainty calibration check
 # ------------------------------------------------------------------
@@ -210,12 +247,14 @@ print(f"  Mean z-score : {z_scores.mean():.3f}  (expect ~0.8 for well-calibrated
 
 
 
+
 # ------------------------------------------------------------------
 # Save the predicted mean and sigma of the GPs based on this LOO-CV
 # ------------------------------------------------------------------
 
-np.save("gp_mu_loocv_naive.npy",    loo_mu)
-np.save("gp_sigma_loocv_naive.npy", loo_sigma)
+np.save("gp_mu_loocv_short.npy",    loo_mu)
+np.save("gp_sigma_loocv_short.npy", loo_sigma)
 
 print(f"\nSaved mu and sigma values.")
+
 
