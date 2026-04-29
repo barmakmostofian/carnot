@@ -4,7 +4,7 @@ at a time, refitting the GP on the remaining n-1 compounds, and
 predicting the held-out compound.
 
 With n applications of the resource-intensive Cholesky decomposition,
-the complexity of this approach is O(n^3).
+the complexity of this approach is O(n^4).
 
 The entire GP procedure follows the work of: 
 C. E. Rasmussen & C. K. I. Williams. 
